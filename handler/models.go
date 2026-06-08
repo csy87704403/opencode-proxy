@@ -21,14 +21,16 @@ type ModelsResponse struct {
 	Data   []ModelInfo `json:"data"`
 }
 
-// 缓存可用模型列表与并发读写锁
+// 缓存相关的全局变量
 var (
-	cachedModels     []ModelInfo
-	cachedMutex      sync.RWMutex
-	initialCheckDone = false
+	cachedModels []ModelInfo
+	lastChecked  time.Time
+	cachedMutex  sync.RWMutex
+	isChecking   bool
+	checkMutex   sync.Mutex
 )
 
-// 兜底返回模型列表（在首次启动且检测未完成时使用）
+// 默认兜底及初始模型列表
 var defaultBackupModels = []ModelInfo{
 	{ID: "big-pickle", Object: "model", OwnedBy: "opencode"},
 	{ID: "nemotron-3-super-free", Object: "model", OwnedBy: "opencode"},
@@ -38,25 +40,14 @@ var defaultBackupModels = []ModelInfo{
 }
 
 func init() {
-	// 启动后台异步检测协程
-	go startPeriodicProbing()
+	// 初始状态下直接将缓存设置为默认备份列表
+	cachedModels = defaultBackupModels
+	// 注意：此处不再启动任何后台定时器（Idle状态下完全静默）
 }
 
-// 定时循环检测模型可用性
-func startPeriodicProbing() {
-	// 首次启动立即执行一次检测
-	probeModels()
-
-	// 之后每隔 30 分钟在后台自动检测一次
-	ticker := time.NewTicker(30 * time.Minute)
-	for range ticker.C {
-		probeModels()
-	}
-}
-
-// 探测函数：并发向 OpenCode 验证每个候选模型
+// 探测函数：并发向 OpenCode 验证每个候选模型，并更新缓存与时间戳
 func probeModels() {
-	log.Println("[Probe] Starting dynamic model health check...")
+	log.Println("[Probe] Revalidating models list from upstream...")
 
 	candidates := fetchUpstreamCandidates()
 	if len(candidates) == 0 {
@@ -79,18 +70,20 @@ func probeModels() {
 				mu.Unlock()
 				log.Printf("[Probe] Model %s is active and free.", model.ID)
 			} else {
-				log.Printf("[Probe] Model %s failed health check (expired or paid). Skip.", model.ID)
+				log.Printf("[Probe] Model %s failed health check. Skip.", model.ID)
 			}
 		}(candidate)
 	}
 	wg.Wait()
 
-	log.Printf("[Probe] Verification finished. Found %d working free models.", len(verifiedModels))
+	log.Printf("[Probe] Revalidation finished. Verified %d models.", len(verifiedModels))
 
-	// 更新内存缓存
+	// 更新内存缓存及时间戳
 	cachedMutex.Lock()
-	cachedModels = verifiedModels
-	initialCheckDone = true
+	if len(verifiedModels) > 0 {
+		cachedModels = verifiedModels
+		lastChecked = time.Now()
+	}
 	cachedMutex.Unlock()
 }
 
@@ -128,7 +121,7 @@ func fetchUpstreamCandidates() []ModelInfo {
 	return candidates
 }
 
-// 测试单个模型的可用性 (发送 1 个 max_tokens 的极小请求)
+// 测试单个模型的可用性
 func testModelAvailability(modelID string) bool {
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -153,17 +146,39 @@ func testModelAvailability(modelID string) bool {
 	}
 	defer resp.Body.Close()
 
-	// 只要接口返回 2xx 状态码，表示该模型目前在免费测试中
 	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }
 
-// 接口处理器：瞬间从缓存中返回数据 (0ms 延时)
+// 接口处理器：采用 Stale-While-Revalidate 机制，0ms 延时瞬间响应，后台异步更新
 func ModelsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	// 1. 判断缓存是否过期 (24小时)
+	cachedMutex.RLock()
+	needRevalidate := time.Since(lastChecked) > 24*time.Hour
+	cachedMutex.RUnlock()
+
+	// 2. 若过期，则惰性触发异步检测（仅启动单个任务，防并发冲突）
+	if needRevalidate {
+		checkMutex.Lock()
+		if !isChecking {
+			isChecking = true
+			go func() {
+				defer func() {
+					checkMutex.Lock()
+					isChecking = false
+					checkMutex.Unlock()
+				}()
+				probeModels()
+			}()
+		}
+		checkMutex.Unlock()
+	}
+
+	// 3. 瞬间返回当前缓存的数据（Stale-While-Revalidate 核心，保障 0ms 响应）
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
@@ -172,12 +187,7 @@ func ModelsHandler(w http.ResponseWriter, r *http.Request) {
 
 	var resp ModelsResponse
 	resp.Object = "list"
-
-	if initialCheckDone && len(cachedModels) > 0 {
-		resp.Data = cachedModels
-	} else {
-		resp.Data = defaultBackupModels
-	}
+	resp.Data = cachedModels
 
 	_ = json.NewEncoder(w).Encode(resp)
 }
