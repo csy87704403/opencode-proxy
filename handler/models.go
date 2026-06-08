@@ -26,10 +26,7 @@ func ModelsHandler(w http.ResponseWriter, r *http.Request) {
 		Object: "list",
 		Data: []ModelInfo{
 			{ID: "big-pickle", Object: "model", OwnedBy: "opencode"},
-			{ID: "qwen3.6-plus-free", Object: "model", OwnedBy: "opencode"},
 			{ID: "nemotron-3-super-free", Object: "model", OwnedBy: "opencode"},
-			{ID: "minimax-m2.5-free", Object: "model", OwnedBy: "opencode"},
-			{ID: "trinity-large-preview-free", Object: "model", OwnedBy: "opencode"},
 		},
 	}
 
