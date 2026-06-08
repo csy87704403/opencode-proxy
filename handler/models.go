@@ -2,8 +2,8 @@ package handler
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -24,7 +24,7 @@ func ModelsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. 尝试动态从 OpenCode 上游拉取最新模型列表
+	// 1. 尝试动态从 OpenCode 上游拉取最新模型列表并过滤
 	client := &http.Client{Timeout: 5 * time.Second}
 	reqUpstream, err := http.NewRequestWithContext(r.Context(), "GET", "https://opencode.ai/zen/v1/models", nil)
 	if err == nil {
@@ -34,10 +34,23 @@ func ModelsHandler(w http.ResponseWriter, r *http.Request) {
 		resp, err := client.Do(reqUpstream)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			defer resp.Body.Close()
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, _ = io.Copy(w, resp.Body)
-			return
+
+			var upstreamResp ModelsResponse
+			if err := json.NewDecoder(resp.Body).Decode(&upstreamResp); err == nil {
+				// 过滤逻辑：只保留以 "-free" 结尾的模型，以及特别免费模型 "big-pickle"
+				var filteredData []ModelInfo
+				for _, model := range upstreamResp.Data {
+					if strings.HasSuffix(model.ID, "-free") || model.ID == "big-pickle" {
+						filteredData = append(filteredData, model)
+					}
+				}
+				upstreamResp.Data = filteredData
+
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(upstreamResp)
+				return
+			}
 		}
 	}
 
