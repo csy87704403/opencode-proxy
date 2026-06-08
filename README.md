@@ -91,9 +91,26 @@ docker logs -f opencode-proxy
 
 ---
 
-## 4. 客户端配置示例
+## 4. 安全鉴权配置 (PROXY_API_KEY)
+
+本代理工具内置了 `AuthMiddleware` 鉴权中间件，部署在公网时默认开启，以防端口被黑客扫描滥用。
+
+### 密钥配置
+你可以在 VPS 上的 `docker-compose.yml` 环境变量中修改密钥：
+```yaml
+    environment:
+      - PORT=20128
+      - PROXY_API_KEY=你的自定义密钥
+```
+
+*若将 `PROXY_API_KEY` 留空，则不启用鉴权（**极不推荐**）。*
+
+---
+
+## 5. 客户端配置示例
 
 配置本地开发工具（如 Cursor / Cline / Claude Code）：
 - **接口地址 (Base URL)**: `http://你的VPS_IP:20128/v1` （请在 VPS 防火墙放行 `20128` 端口）
-- **API Key**: 任意填写（比如 `sk-key`）
-- **大模型名称**: `oc/big-pickle`，`oc/qwen3.6-plus-free` 或直接用 `big-pickle` 等。
+- **API Key / 密码**: 填写你在 `docker-compose.yml` 中设置的 `PROXY_API_KEY`（默认值为 `sk_opencode_proxy_default_key_2026`）
+- **大模型名称**: `big-pickle`，`nemotron-3-super-free` 等可用的免费模型名。
+
