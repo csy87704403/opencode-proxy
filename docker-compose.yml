@@ -9,3 +9,4 @@ services:
       - "20128:20128"
     environment:
       - PORT=20128
+      - PROXY_API_KEY=sk_opencode_proxy_default_key_2026
