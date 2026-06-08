@@ -3,16 +3,25 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
 
-// 已知虽然名字带 -free 但实际已结束免费推广或不可用的模型黑名单
-var blacklistedModels = map[string]bool{
-	"minimax-m3-free":            true,
-	"minimax-m2.5-free":          true,
-	"qwen3.6-plus-free":          true,
-	"trinity-large-preview-free": true,
+// 判断模型是否被环境变量配置的黑名单过滤
+func isBlacklisted(modelID string) bool {
+	blacklistEnv := os.Getenv("BLACKLIST_MODELS")
+	if blacklistEnv == "" {
+		return false
+	}
+	// 将环境变量通过逗号分割
+	models := strings.Split(blacklistEnv, ",")
+	for _, m := range models {
+		if strings.TrimSpace(m) == modelID {
+			return true
+		}
+	}
+	return false
 }
 
 type ModelInfo struct {
@@ -45,10 +54,10 @@ func ModelsHandler(w http.ResponseWriter, r *http.Request) {
 
 			var upstreamResp ModelsResponse
 			if err := json.NewDecoder(resp.Body).Decode(&upstreamResp); err == nil {
-				// 过滤逻辑：排除黑名单，且只保留以 "-free" 结尾的模型或 "big-pickle"
+				// 过滤逻辑：排除环境变量黑名单，且只保留以 "-free" 结尾的模型或 "big-pickle"
 				var filteredData []ModelInfo
 				for _, model := range upstreamResp.Data {
-					if blacklistedModels[model.ID] {
+					if isBlacklisted(model.ID) {
 						continue
 					}
 					if strings.HasSuffix(model.ID, "-free") || model.ID == "big-pickle" {
