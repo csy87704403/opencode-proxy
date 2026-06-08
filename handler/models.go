@@ -7,6 +7,14 @@ import (
 	"time"
 )
 
+// 已知虽然名字带 -free 但实际已结束免费推广或不可用的模型黑名单
+var blacklistedModels = map[string]bool{
+	"minimax-m3-free":            true,
+	"minimax-m2.5-free":          true,
+	"qwen3.6-plus-free":          true,
+	"trinity-large-preview-free": true,
+}
+
 type ModelInfo struct {
 	ID      string `json:"id"`
 	Object  string `json:"object"`
@@ -37,9 +45,12 @@ func ModelsHandler(w http.ResponseWriter, r *http.Request) {
 
 			var upstreamResp ModelsResponse
 			if err := json.NewDecoder(resp.Body).Decode(&upstreamResp); err == nil {
-				// 过滤逻辑：只保留以 "-free" 结尾的模型，以及特别免费模型 "big-pickle"
+				// 过滤逻辑：排除黑名单，且只保留以 "-free" 结尾的模型或 "big-pickle"
 				var filteredData []ModelInfo
 				for _, model := range upstreamResp.Data {
+					if blacklistedModels[model.ID] {
+						continue
+					}
 					if strings.HasSuffix(model.ID, "-free") || model.ID == "big-pickle" {
 						filteredData = append(filteredData, model)
 					}
@@ -61,8 +72,7 @@ func ModelsHandler(w http.ResponseWriter, r *http.Request) {
 			{ID: "big-pickle", Object: "model", OwnedBy: "opencode"},
 			{ID: "nemotron-3-super-free", Object: "model", OwnedBy: "opencode"},
 			{ID: "deepseek-v4-flash-free", Object: "model", OwnedBy: "opencode"},
-			{ID: "qwen3.6-plus-free", Object: "model", OwnedBy: "opencode"},
-			{ID: "minimax-m3-free", Object: "model", OwnedBy: "opencode"},
+			{ID: "mimo-v2.5-free", Object: "model", OwnedBy: "opencode"},
 			{ID: "nemotron-3-ultra-free", Object: "model", OwnedBy: "opencode"},
 		},
 	}
